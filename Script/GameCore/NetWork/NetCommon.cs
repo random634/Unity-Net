@@ -11,10 +11,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using GameCore.NetWork;
+using GameCore.Network;
 
 
-namespace GameCore.NetWork
+namespace GameCore.Network
 {
     //-------------------------------------------------------------------------
     public enum ENUM_SOCKET_STATE //scoket连接状态
@@ -49,21 +49,18 @@ namespace GameCore.NetWork
     }
     //-------------------------------------------------------------------------
     /// <summary>
-    /// 接收消息委托类
-    /// </summary>
-    /// <param name="packet"></param>
-    public delegate void NetOnRecvMessageDelegate(int nMessageID,Byte[] pBuffer,int nSize);
-    //-------------------------------------------------------------------------
-    /// <summary>
     /// 网络连接状态委托类
     /// </summary>
-    /// <param name="sID"></param>
-    public delegate void NetWorkHandDelegate(int sID);
+    /// <param name="connect"></param>
+    public delegate void NetworkHandleDelegate(INetConnect connect);
+
     //-------------------------------------------------------------------------
+    /// <summary>
+    /// 网络公共定义数据
+    /// </summary>
     public struct SNetCommon
     {
         public static string NULL = "null";
-        public static int NUNE_VALUE = -1;
     }
     //-------------------------------------------------------------------------
     /// <summary>
@@ -71,14 +68,8 @@ namespace GameCore.NetWork
     /// </summary>
     public struct SNetPacketCommon
     {
-        public static int PACK_INDEX_0 = 0;             // 第一个字节位置
-        public static int PACK_INDEX_1 = 1;             // 第二个字节位置
-        public static Byte PACKHEAD0 = 0x08;		    // 包头信息固定值
-        public static Byte PACKHEAD1 = 8;		        // 包头信息固定值
-        public static int PACK_HEAD_OFFSET = 0;		    // 包头信息（两个字节：<0，1>）
-        public static int PACK_LENGTH_OFFSET = 2;		// 消息包长度信息（2个字节：<2,3>）
-        public static int PACK_MESSSAGEID_OFFSET = 4;	// 消息id（2个字节：<4,5>）
-        public static int PACK_MESSAGE_OFFSET = 6;	    // 包体数据;
-        public static int PACK_HEAD_SIZE = 6;           // 定义包头大小
+        public static int PKG_HEAD_OFFSET = 0;         // 包头偏移
+        public static int PKG_HEAD_SIZE = 2;           // 包头大小
+        public static int PKG_BODY_OFFSET = 2;         // 包身偏移
     }
 }

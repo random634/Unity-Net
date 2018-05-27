@@ -1,6 +1,6 @@
 ﻿//*************************************************************************
 //	创建日期:	2015-6-29
-//	文件名称:	NetConnect.cs
+//	文件名称:	NetInterface.cs
 //  创 建 人:    Rect 	
 //	版权所有:	MIT
 //	说    明:	网络连接器接口
@@ -13,30 +13,30 @@ using System.Linq;
 using System.Text;
 using System.Net.Sockets;
 
-namespace GameCore.NetWork
+namespace GameCore.Network
 {
     /// <summary>
     /// 网络状态事件基类
     /// </summary>
     public abstract class INetworkMsgHandler//abstract 
     {
-        public NetWorkHandDelegate del_OnConnectStart;      //socket开始
-        public NetWorkHandDelegate del_OnDisconnect;        //socket意外断开(包括服务端断开命令)的回调函数
-        public NetWorkHandDelegate del_OnConnectSuccess;    //socket连接成功的回调函数
-        public NetWorkHandDelegate del_Update;              //socket处于连接中的回调函数(暂时没用到)
+        public NetworkHandleDelegate del_OnConnectStart;      //socket开始
+        public NetworkHandleDelegate del_OnConnectSuccess;    //socket连接成功的回调函数
+        public NetworkHandleDelegate del_OnDisconnect;        //socket意外断开(包括服务端断开命令)的回调函数
+        public NetworkHandleDelegate del_Update;              //socket处于连接中的回调函数(暂时没用到)
 
         public INetworkMsgHandler()
         {
-            del_OnDisconnect = new NetWorkHandDelegate(OnDisConnect);
-            del_OnConnectSuccess = new NetWorkHandDelegate(OnConnectSuccess);
-            del_OnConnectStart = new NetWorkHandDelegate(OnConnectStart);
-            del_Update = new NetWorkHandDelegate(OnUpdate);
+            del_OnConnectStart = new NetworkHandleDelegate(OnConnectStart);
+            del_OnConnectSuccess = new NetworkHandleDelegate(OnConnectSuccess);
+            del_OnDisconnect = new NetworkHandleDelegate(OnDisConnect);
+            del_Update = new NetworkHandleDelegate(OnUpdate);
         }
 
-        public virtual void OnDisConnect(int sID) { }
-        public virtual void OnConnectSuccess(int sID) { }
-        public virtual void OnConnectStart(int sID) { }
-        public virtual void OnUpdate(int sID) { }
+        protected virtual void OnConnectStart(INetConnect connect) { }
+        protected virtual void OnConnectSuccess(INetConnect connect) { }
+        protected virtual void OnDisConnect(INetConnect connect) { }
+        protected virtual void OnUpdate(INetConnect connect) { }
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ namespace GameCore.NetWork
         /// <summary>
         /// 关闭连接
         /// </summary>
-        void DisConnection();
+        void Disconnect();
 
         /// <summary>
         /// 断线重连
@@ -67,20 +67,25 @@ namespace GameCore.NetWork
         /// <param name="ip">服务器IP地址</param>
         /// <param name="portnumber">端口信息</param>
         /// <returns></returns>
-        bool Connect(int nSocketID, string ip, int portnumber, INetworkMsgHandler listener);
+        bool Connect(int iConnectID, string ip, int portnumber, INetworkMsgHandler listener);
 
         /// <summary>
         /// 发送数据
         /// </summary>
-        /// <param name="nMessageID"></param>
         /// <param name="data"></param>
         /// <returns></returns>
-        bool SendMessage(int nMessageID, Byte[] data);
+        bool SendMessage(Byte[] data);
+
+        /// <summary>
+        /// 取出消息接收缓存中所有的消息，并清空
+        /// </summary>
+        /// <param name="pkgList"></param>
+        void ReceiveAllPkg(List<NetPacketSocket> pkgList);
 
         /// <summary>
         /// 连接器更新
         /// </summary>
-        ENUM_SOCKET_STATE Update(out int nID);
+        ENUM_SOCKET_STATE Update();
 
         /// <summary>
         /// 获取连接类型 tcp or udp or other
@@ -98,7 +103,7 @@ namespace GameCore.NetWork
         /// 接收字节数总数
         /// </summary>
         /// <returns></returns>
-        uint GetRectTotalBytes();
+        uint GetRecvTotalBytes();
 
         /// <summary>
         /// 获取端口
@@ -112,6 +117,13 @@ namespace GameCore.NetWork
         /// <returns></returns>
         string GetIP();
 
+        /// <summary>
+        /// 获取连接ID
+        /// </summary>
+        /// <returns></returns>
+        int GetConnectID();
+
+        
     }
 
     /// <summary>
@@ -119,17 +131,6 @@ namespace GameCore.NetWork
     /// </summary>
     public interface INetPacket
     {
-        /// <summary>
-        /// 清空数据
-        /// </summary>
-        void Clear();
-
-        /// <summary>
-        /// 获取消息号
-        /// </summary>
-        /// <returns></returns>
-        Int16 GetMessageID();
-
         /// <summary>
         /// 获取消息包数据缓存 - 包括包头和包身
         /// </summary>
@@ -146,13 +147,13 @@ namespace GameCore.NetWork
         /// 设置包头的数据
         /// </summary>
         /// <returns>true or false</returns>
-        bool SetPackHead(Byte[] headData);
+        bool SetPkgHead(Byte[] headData);
 
         /// <summary>
         /// 设置包身的数据
         /// </summary>
         /// <returns>true or false</returns>
-        bool SetPackBody(Byte[] bodyData);
+        bool SetPkgBody(Byte[] bodyData);
 
         /// <summary>
         /// 获取包大小
@@ -164,20 +165,16 @@ namespace GameCore.NetWork
     /// <summary>
     /// 网络管理器接口
     /// </summary>
-    public interface INetWork
+    public interface INetwork
     {
         void Update();
         void Connect(int id, string host, int port, INetworkMsgHandler listener);
+        void Reconnect(int id);
+        bool SendMessage(int id, Byte[] data);
         void Disconnect(int id);
         void DisconnectAll();
-        void ReConnect();
-        bool SendMessage(int command, Byte[] data, int id = -1);
-        int GetCurrentServerID();
-        void SetCurrentServerID(int v);
-        int GetReadyToConnectSID();
-        void SetReadyToConnectSID(int v);
-        string ToNetWorkString();
+        string ToNetWorkString(int id);
+        bool IsConnect(int id);
     }
-
 
 }

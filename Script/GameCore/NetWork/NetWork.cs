@@ -1,6 +1,6 @@
 ﻿//*************************************************************************
 //	创建日期:	2015-6-29
-//	文件名称:	NetWork.cs
+//	文件名称:	Network.cs
 //  创 建 人:    Rect 	
 //	版权所有:	MIT
 //	说    明:	网络中心处理
@@ -14,27 +14,44 @@ using System.Linq;
 using System.Text;
 using UnityEngine;
 
-namespace GameCore.NetWork
+namespace GameCore.Network
 {
-    
-    public class CNetTCPWork : INetWork
+    public enum NetworkType
+    {
+        NONE = 0, // 可用于作为 loopback 类型连接
+        TCP,
+        UDP
+    }
+
+    public class NetworkMgr : Singleton<NetworkMgr>
+    {
+        public CNetworkTCP Tcp { get; private set; }
+        public NetworkMgr()
+        {
+            Tcp = new CNetworkTCP();
+        }
+
+        ~NetworkMgr()
+        {
+            Tcp = null;
+        }
+    }
+
+    public class CNetworkTCP : INetwork
     {
         #region Member variables
-        private Dictionary<int, CNetTCPSocketConnect> m_TCPConnects;
-        private int m_currentConnectedSID;
-        private ENUM_SOCKET_STATE m_currentConnectState;
+        private Dictionary<int, INetConnect> m_TCPConnects;
 
-        private int m_ReadyToConnectSID;
         #endregion
         //-------------------------------------------------------------------------
-        public CNetTCPWork()
+        public CNetworkTCP()
         {
-            m_TCPConnects = new Dictionary<int, CNetTCPSocketConnect>();
+            m_TCPConnects = new Dictionary<int, INetConnect>();
 
             DisconnectAll();
         }
         //-------------------------------------------------------------------------
-        ~CNetTCPWork()
+        ~CNetworkTCP()
         {
             DisconnectAll();
         }
@@ -51,21 +68,13 @@ namespace GameCore.NetWork
                 return;
             }
 
-            List<CNetTCPSocketConnect> listTemp = new List<CNetTCPSocketConnect>();
-
-            foreach (KeyValuePair<int, CNetTCPSocketConnect> p in m_TCPConnects)
+            var iter = m_TCPConnects.GetEnumerator();
+            while (iter.MoveNext())
             {
-                listTemp.Add(p.Value);
+                INetConnect connect = iter.Current.Value;
+
+                __Update(connect);
             }
-
-            foreach (CNetTCPSocketConnect c in listTemp)
-            {
-                __Update(c);
-            }
-
-            listTemp.Clear();
-
-
         }
         //-------------------------------------------------------------------------
         /// <summary>
@@ -77,34 +86,34 @@ namespace GameCore.NetWork
         /// <param name="listener"></param>
         public void Connect(int id, string host, int port, INetworkMsgHandler listener)
         {
-            SetReadyToConnectSID(id);
-
-            if (ENUM_SOCKET_STATE.eSocket_Connected == m_currentConnectState)
+            if (m_TCPConnects.ContainsKey(id))
             {
-                if (id == m_currentConnectedSID)
+                Debug.Log("NetTCPWork::Connect already connect the Socket ID = " + id);
+
+                if (m_TCPConnects[id].IsConnect())
                 {
-                    Debug.Log("NetTCPWork::Connect already connect the server ID = " + id);
-                    return;
+                    m_TCPConnects[id].Disconnect();
                 }
 
-                CNetTCPSocketConnect connect = new CNetTCPSocketConnect();
-                bool success = connect.Connect(id,host, port, listener);
-                if (success)
-                {
-                    SetCurrentServerID(id);
-                    m_TCPConnects.Add(id, connect);
-                }
+                m_TCPConnects[id].Connect(id, host, port, listener);
+                return;
             }
-            else
-            {
-                Disconnect(id);
 
-                CNetTCPSocketConnect connect = new CNetTCPSocketConnect();
-                bool success = connect.Connect(id,host, port, listener);
-                if (success)
-                {
-                    m_TCPConnects.Add(id, connect);
-                }
+            CNetConnectTCPSocket connect = new CNetConnectTCPSocket();
+            connect.Connect(id, host, port, listener);
+            m_TCPConnects.Add(id, connect);
+        }
+        //-------------------------------------------------------------------------
+        /// <summary>
+        /// 重连
+        /// </summary>
+        public void Reconnect(int id)
+        {
+            INetConnect c = null;
+            if (m_TCPConnects.TryGetValue(id, out c))
+            {
+                c.Disconnect();
+                c.Reconnect();
             }
         }
         //-------------------------------------------------------------------------
@@ -114,22 +123,18 @@ namespace GameCore.NetWork
         /// <param name="id"></param>
         public void Disconnect(int id)
         {
-            CNetTCPSocketConnect c = null;
+            INetConnect c = null;
 
             if (m_TCPConnects.TryGetValue(id, out c))
             {
                 if (null != c)
                 {
                     Debug.Log("CNetTCPWork::Disconnect Remove ID = " + id);
-                    c.DisConnection();
+                    c.Disconnect();
                     m_TCPConnects[id] = null;
-                    if (id == m_currentConnectedSID)
-                    {
-                        m_currentConnectState = ENUM_SOCKET_STATE.eSocket_DisConnected;
-                    }
                 }
+
                 m_TCPConnects.Remove(id);
-                
             }
             
         }
@@ -139,11 +144,11 @@ namespace GameCore.NetWork
         /// </summary>
         public void DisconnectAll()
         {
-            foreach (KeyValuePair<int, CNetTCPSocketConnect> p in m_TCPConnects)
+            foreach (KeyValuePair<int, INetConnect> p in m_TCPConnects)
             {
                 if (null != p.Value)
                 {
-                    p.Value.DisConnection();
+                    p.Value.Disconnect();
                 }
 
             }
@@ -151,92 +156,42 @@ namespace GameCore.NetWork
             __Clear();
         }
         //-------------------------------------------------------------------------
-        /// <summary>
-        /// 重连当前连接
-        /// </summary>
-        public void ReConnect()
-        {
-            CNetTCPSocketConnect c = null;
-            if (m_TCPConnects.TryGetValue(m_currentConnectedSID, out c))
-            {
-                c.DisConnection();
-                c.Reconnect();
-            }
-        }
-        //-------------------------------------------------------------------------
-        public bool SendMessage(int nMessageID, Byte[] data, int id = -1)
+        public bool SendMessage(int id, Byte[] data)
         {
             if (null == data)
             {
                 return false;
             }
 
-             // 如果还没刷新 就手动刷新一次
-            //if (SNetCommon.NUNE_VALUE == m_currentConnectedSID)
-            //{
-            //    Update();
-            //}
-
-            int tempID = id;
-            if (id == SNetCommon.NUNE_VALUE)
-            {
-                tempID = m_currentConnectedSID;
-            }
-
-            // 防止 系统尚未update connect 但是就sendMessage了
-            if (id == SNetCommon.NUNE_VALUE)
-            {
-                tempID = m_ReadyToConnectSID;
-            }
-
-            CNetTCPSocketConnect c = null;
-            if (m_TCPConnects.TryGetValue(tempID, out c))
+            INetConnect c = null;
+            if (m_TCPConnects.TryGetValue(id, out c))
             {
                 if (null != c || c.IsConnect())
                 {
-                    c.SendMessage(nMessageID, data);
+                    c.SendMessage(data);
                     return true;
                 }
             }
+
             Debug.Log("CNetWork::SendMessage false id = " + id);
             return false;
         }
         //-------------------------------------------------------------------------
-        public int GetCurrentServerID()
-        {
-            return m_currentConnectedSID;
-        }
-        //-------------------------------------------------------------------------
-        public void SetCurrentServerID(int v)
-        {
-            m_currentConnectedSID = v;
-        }
-        //-------------------------------------------------------------------------
-        public int GetReadyToConnectSID()
-        {
-            return m_ReadyToConnectSID;
-        }
-        //-------------------------------------------------------------------------
-        public void SetReadyToConnectSID(int v)
-        {
-            m_ReadyToConnectSID = v;
-        }
-        //-------------------------------------------------------------------------
-        public string ToNetWorkString()
+        public string ToNetWorkString(int id)
         {
             StringBuilder strBuilder = new StringBuilder();
             strBuilder.Append("have no connect!");
             uint unSendData = 0;
             uint unRecvData = 0;
 
-            CNetTCPSocketConnect c = null;
-            if (m_TCPConnects.TryGetValue(m_currentConnectedSID, out c))
+            INetConnect c = null;
+            if (m_TCPConnects.TryGetValue(id, out c))
             {
                 if (null != c )
                 {
                     strBuilder.Remove(0, strBuilder.Length);
                     unSendData = c.GetSendTotalBytes();
-                    unRecvData = c.GetRectTotalBytes();
+                    unRecvData = c.GetRecvTotalBytes();
 
                     if (c.IsConnect())
                     {
@@ -257,44 +212,35 @@ namespace GameCore.NetWork
             return strBuilder.ToString();
         }
         //-------------------------------------------------------------------------
+        public bool IsConnect(int id)
+        {
+            INetConnect c = null;
+            if (m_TCPConnects.TryGetValue(id, out c))
+            {
+                return c.IsConnect();
+            }
+
+            return false;
+        }
+        //-------------------------------------------------------------------------
         #endregion
 
         #region private method
         //-------------------------------------------------------------------------
         private void __Clear()
         {
-            m_currentConnectedSID = SNetCommon.NUNE_VALUE;
-            m_currentConnectState = ENUM_SOCKET_STATE.eSocket_DisConnected;
-            m_ReadyToConnectSID = SNetCommon.NUNE_VALUE;
+
         }
         //-------------------------------------------------------------------------
-        private void __Update(CNetTCPSocketConnect connect)
+        private void __Update(INetConnect connect)
         {
             if (null == connect)
             {
                 return;
             }
 
-            int nID = SNetCommon.NUNE_VALUE;
-            // 进入连接器 状态回调
-            ENUM_SOCKET_STATE sState = connect.Update(out nID);
-            if (nID == m_ReadyToConnectSID)
-            {
-                m_currentConnectState = sState;
-                m_currentConnectedSID = m_ReadyToConnectSID;
-            }
-
-            // 消息取出来 外部进行消息分发
-            if (connect.IsConnect())
-            {
-                List<SocketNetPacket> packList = new List<SocketNetPacket>();
-                connect.GetAllReceivePack(packList);
-                foreach (SocketNetPacket tempack in packList)
-                {
-                    NetMessageRecieveHandle.GetInstance().OnRecvMessage(tempack);
-                }
-            }
-            
+            // 连接更新
+            ENUM_SOCKET_STATE sState = connect.Update();
         }
         #endregion
     }
